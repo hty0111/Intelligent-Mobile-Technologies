@@ -1,0 +1,5 @@
+<launch>
+    <!-- Run the map server -->
+    <arg name="map_file" default="$(find jackal_helper)/worlds/BARN/map_files/yaml_299.yaml"/>
+    <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)"/>
+</launch>

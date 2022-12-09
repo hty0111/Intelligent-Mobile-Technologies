@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$/.." vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/lms1xx" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/pointgrey_camera_driver" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/sick_tim" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/velodyne_simulator" vcs="Git" />
+  </component>
+</project>
