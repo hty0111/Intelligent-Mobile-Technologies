@@ -1,254 +1,400 @@
-#!/usr/bin/env python2.7
-# -*- coding: utf-8 -*-
-# @Description: RRT planner
-# @version: v1.0
-# @Author: HTY
-# @Date: 2022-07-05 23:07:04
-
-import rospy
 from scipy.spatial import KDTree
 import numpy as np
 import random
 import math
+import time
+
+
+class Node(object):
+    """
+    定义节点，包括坐标、索引、子节点、父节点、转弯点、与其父节点之间距离等属性
+    用以在线性表中存储树节点
+    """
+    def __init__(self, data, index):
+        self.data = data
+        self.children = []
+        self.parent = None
+        self.index = index
+        self.turning = 0
+        self.par_dis = 0
+
+    # 添加子节点函数
+    def add_chid(self,obj):
+        self.children.append(obj)
+
+    # 添加父节点函数
+    def seek_parent(self,obj):
+        self.parent = obj
+
+    # 提取节点坐标函数
+    def get_data(self):
+        return self.data
+
+    # 提取节点索引函数
+    def get_index(self):
+        return self.index
+
+    def cal_par_dis(self):
+        self.par_dis = math.hypot(self.data[0] - self.parent.data[0], self.data[1] - self.parent.data[1])
+
+    def cal_dis(self):
+        node = self
+        len = 0
+        while node != None:
+            len += node.par_dis
+            node = node.parent
+        return len
 
 
 class RRT(object):
-    min_x = -10
-    max_x = 10
-    min_y = -10
-    max_y = 10
+    """
+    初始化采样上限、生长步长、膨胀半径、地图范围、优化测试半径等
+    """
 
-    def __init__(self, obstacle_x, obstacle_y, grid_size, robot_radius, max_point_num=500, max_sample_times=50000,
-                 step_size=0.5, prob_goal=0.1, goal_threshold=1):
-        self.obs_tree = KDTree(np.vstack((obstacle_x, obstacle_y)).T)   # Obstacle KD Tree
-        self.avoid_dist = grid_size
-        self.robot_radius = robot_radius
-        self.max_point_num = max_point_num
-        self.max_sample_times = max_sample_times
-        self.step_size = step_size  # distance of extension
-        self.prob_goal = prob_goal  # probability of choosing goal point when sampling
-        self.goal_threshold = goal_threshold
-        self.MAKE_STRAIGHT = True
+    def __init__(self, plan_ox,plan_oy,plan_grid_size,plan_robot_radius):
+        self.N_SAMPLE = 1000
+        self.minx = -4.5
+        self.maxx = 0
+        self.miny = 0
+        self.maxy = 10
+        self.robot_size = plan_robot_radius
+        self.avoid_dist = 0.05
+        self.step = 0.3
+        self.obstacle_x = plan_ox
+        self.obstacle_y = plan_oy
+        
+        self.achieve_dis = 0.3
+        self.rpt_dis = 0.2
+        
+        print("\n\n\nRRT object init successfully!!!\n\n")
 
-    def plan(self, start_x, start_y, goal_x, goal_y):
-        # RRT tree
-        rrt_x = [start_x]
-        rrt_y = [start_y]
-        # print(np.array([[start_x], [start_y]]).T)
+    # rrt路径规划函数，输入起点和终点坐标，返回可行路径
+    def plan(self, plan_sx,plan_sy,plan_gx,plan_gy):
+        """
 
-        # RRT* algorithm
-        road_map = [-1]  # father nodes
-        final_points = []
-        new_index = 1
-        sample_times = 1
-        find_flag = 0
-        path = []
+        :param plan_sx: 起点横坐标
+        :param plan_sy: 起点纵坐标
+        :param plan_gx: 终点横坐标
+        :param plan_gy: 终点纵坐标
+        :return: 规划路径节点横纵坐标，优化后路径节点横纵坐标，rrt树图及节点横纵坐标，优化后节点序列
+        """
+        # 记录开始时间
+        start_time = time.time()
+        # 初始化rrt树图，并将起点加入树图
+        tree_map = []
+        start = Node([plan_sx,plan_sy],0)
+        tree_map.append(start)
+        # # 导入障碍物坐标
+        # obstacle_x = [-999999]
+        # obstacle_y = [-999999]
 
-        while new_index < self.max_point_num + 1:
-            if new_index % 50 == 0:
-                rospy.loginfo("Index: %d | Loop: %d", new_index, sample_times)
-            # Sample
-            p = random.random()
-            if p < self.prob_goal:
-                sample_x, sample_y = goal_x, goal_y
-                # print(p, "-------------------------")
-            else:
-                sample_x, sample_y = self.sampling()
-            # print("sample: ", sample_x, sample_y)
+        # 构建障碍物KDtree
+        obstree = KDTree(np.vstack((self.obstacle_x, self.obstacle_y)).T)
 
-            # Select the node in the RRT tree that is closest to the sample node
-            nearest_x, nearest_y, nearest_index = self.nearestNode(sample_x, sample_y, rrt_x, rrt_y)
-            # print("nearest: ", nearest_x, nearest_y)
-
-            # Create a new node accoding to the orientation
-            new_x, new_y = self.extend(nearest_x, nearest_y, sample_x, sample_y)
-            # print("new: ", new_x, new_y)
-            # print("----------------------------")
-
-            if new_x and new_y:
-                road_map.append(nearest_index)
-                rrt_x.append(new_x)
-                rrt_y.append(new_y)
-                # print(road_map)
-                # print("new node: ", new_x, new_y)
-
-                # if distance < threshold, close enough
-                if math.sqrt((goal_x - new_x) ** 2 + (goal_y - new_y) ** 2) < self.goal_threshold:
-                    final_points.append(new_index)
-                    find_flag = 1  # find the goal
-                    # choose final path from final points
-                    path = self.final_path(rrt_x, rrt_y, road_map, final_points)
-                new_index += 1
-
-            sample_times += 1
-            if sample_times > self.max_sample_times:
-                print("Reached max sampling times.")
-                return [], []
-
-            if find_flag:
-                break
-
-        # print(final_points)
+        # 初始化节点xy坐标数组，并加入起点坐标
+        rt_x, rt_y = [], []
+        rt_x.append(plan_sx)
+        rt_y.append(plan_sy)
+        # 将起点加入rrt的KDtree
+        rtree = KDTree(np.vstack((rt_x, rt_y)).T)
+        # 初始化最终路径xy坐标数组
         path_x, path_y = [], []
-        for i in path:
-            path_x.append(rrt_x[i])
-            path_y.append(rrt_y[i])
 
-        path_x.append(goal_x)
-        path_y.append(goal_y)
-        if self.MAKE_STRAIGHT:
-            path_x, path_y = self.make_straight(path_x, path_y)
-            path_x.append(goal_x)
-            path_y.append(goal_y)
+        j = 0
+        # 开始采样生长，判断是否找到路径或是否超过采样次数
+        while self.check_end(rtree, plan_gx, plan_gy) and self.check_len(rt_x):
+            # 采样并找到距离采样点最近的rrt树上的节点，从该节点出发向采样点生长一段距离step
+            sample_x, sample_y = self.sampling(plan_gx, plan_gy, obstree)
+            distance, index = rtree.query(np.array([sample_x, sample_y]))
+            gx = rt_x[index]
+            gy = rt_y[index]
+            nx = gx + self.step*(sample_x-gx)/distance
+            ny = gy + self.step*(sample_y-gy)/distance
 
-        if find_flag:
-            print("Path is found!")
-            return path_x, path_y
-        else:
-            print("Cannot find path!")
+            # 判断生长产生的新节点是否与障碍物有碰撞或是否与rrt树上现有节点重复（距离过近）
+            if not self.check_obs(gx, gy, nx, ny, obstree, plan_sx, plan_sy) and not self.check_rpt(nx, ny, rtree):
+                # print(9)
+                # 将新节点加入rrt的KDtree
+                j = j + 1
+                rt_x.append(nx)
+                rt_y.append(ny)
+                rtree = KDTree(np.vstack((rt_x, rt_y)).T)
+                # 将新节点加入rrt树图，并给新节点赋予父节点，给其父节点赋予子节点
+                tree_map.append(Node([nx, ny], j))
+                tree_map[j].seek_parent(tree_map[index])
+                tree_map[index].add_chid(tree_map[j])
+                tree_map[j].cal_par_dis()
+        if not self.check_end(rtree, plan_gx, plan_gy):
+                distance, index = rtree.query(np.array([plan_gx, plan_gy]))
+                rt_x.append(plan_gx)
+                rt_y.append(plan_gy)
+                j += 1
+                tree_map.append(Node([plan_gx, plan_gy],j))
+                tree_map[j].seek_parent(tree_map[index])
+                tree_map[index].add_chid(tree_map[j])
+                tree_map[j].cal_par_dis()             
+        # 初始化连通图
+        road_map = []
+        parent_map = []
+        # 按照节点顺序将各个节点的子节点加入连通图
+        for i in range(len(rtree.data)):
+            road_map.append([child.get_index() for child in tree_map[i].children])
+            parent_map.append(tree_map[i].parent.index if i !=0 else -1)
+        # 将终点加入path
+        path_x.append(tree_map[j].get_data()[0])
+        path_y.append(tree_map[j].get_data()[1])
+        # 根据父节点回溯path
+        while i != 0:
+            path_x.append(tree_map[i].parent.get_data()[0])
+            path_y.append(tree_map[i].parent.get_data()[1])
+            i = tree_map[i].parent.get_index()
 
-        return path_x, path_y
+        # 优化路径
+        path_x = list(reversed(path_x))
+        path_y = list(reversed(path_y))
+        patho_x, patho_y = self.optimize(path_x, path_y, obstree)
 
-    def sampling(self):
-        sample_x = (random.random() * (self.max_x - self.min_x)) + self.min_x
-        sample_y = (random.random() * (self.max_y - self.min_y)) + self.min_y
+        # 将优化后路径上的各节点加入optroad数组
+        optroad = []
+        for k in range(len(patho_x)):
+            optroad.append(Node([patho_x[k], patho_y[k]], k))
+        turning = []
+
+        # 根据优化后路径上各节点与其前后节点连线的夹角值判断是否为一个转弯点
+        for l in range(1,len(patho_x)-1):
+            dx1 = patho_x[l] - patho_x[l-1]
+            dy1 = patho_y[l] - patho_y[l-1]
+            dx2 = patho_x[l+1] - patho_x[l]
+            dy2 = patho_y[l+1] - patho_y[l]
+            theta1 = math.atan2(dy1, dx1)
+            theta2 = math.atan2(dy2, dx2)
+            delta = min(math.pi - theta1 + theta2, math.pi + theta1 - theta2)
+            if delta < 5*math.pi/6:
+                optroad[l].turning = 1
+                turning.append(0.001)
+            else:
+                turning.append(0)
+        turning.append(0.002)
+
+        # 记录结束时间
+        end_time=time.time()
+        # 对优化后的路径进行插值处理
+        pathi_x, pathi_y = self.inter(patho_x, patho_y)
+
+        defult_turning = []
+        for i in range(len(pathi_x)):
+            defult_turning.append(0)
+
+
+        patho_x = list(reversed(patho_x))
+        patho_y = list(reversed(patho_y))
+
+        path_x = list(reversed(path_x))
+        path_y = list(reversed(path_y))
+
+        # pathi_x = list(reversed(pathi_x))
+        # pathi_y = list(reversed(pathi_y))
+
+        print("Plan Successfully!!!!!!!!!!!!!!!!!!!")
+
+        # 返回优化、插值路径及转弯点判断（默认无）
+        return pathi_x, pathi_y, defult_turning
+
+    # 采样函数，输入目标点及障碍物的KDtree，返回一个合理的采样点的xy坐标，为了提高收敛速度，采样有50%概率进行全图随机采样，有50%概率直接将目标点作为本次采样点
+    def sampling(self, plan_gx, plan_gy, obstree):
+        """
+
+        :param plan_gx: 终点横坐标
+        :param plan_gy: 终点纵坐标
+        :param obstree: 障碍物的KDtree
+        :return: 采样点横纵坐标
+        """
+        sample_x = None
+        sample_y = None
+        cc = 1
+        # cc用来保证每次采到且只采一个合理点
+        while cc:
+            # 50%概率全图随机采样
+            if random.random() < 0.5:
+                tx = (random.random() * (self.maxx - self.minx)) + self.minx
+                ty = (random.random() * (self.maxy - self.miny)) + self.miny
+
+                distance, index = obstree.query(np.array([tx, ty]))
+                # 判断采样点是否在障碍物范围，防止rrt树生长方向朝向障碍物
+                if distance >= self.robot_size + self.avoid_dist:
+                    sample_x = tx
+                    sample_y = ty
+                    cc = 0
+
+            # 50%概率将目标点设为本次采样点
+            else:
+                sample_x = plan_gx
+                sample_y = plan_gy
+                cc = 0
+
         return sample_x, sample_y
 
-    def nearestNode(self, sample_x, sample_y, rrt_x, rrt_y):
+    # 检测是否找到可行路径函数，若找到则返回False，否则返回True
+    def check_end(self, rtree, plan_gx, plan_gy):
         """
-        Find the nearest node on the tree to the sample point
+
+        :param rtree: rrt的KDtree
+        :param plan_gx: 终点横坐标
+        :param plan_gy: 终点纵坐标
+        :return: True or False
         """
-        min_dst = 999999
-        nearest_x, nearest_y, nearest_index = 0, 0, 0
-        for i in range(len(rrt_x)):
-            dst = self.cal_euler_dst(rrt_x[i], rrt_y[i], sample_x, sample_y)
-            math.sqrt((rrt_x[i] - sample_x) ** 2 + (rrt_y[i] - sample_y) ** 2)
-            if dst < min_dst:
-                min_dst = dst
-                nearest_x = rrt_x[i]
-                nearest_y = rrt_y[i]
-                nearest_index = i
-        return nearest_x, nearest_y, nearest_index
-
-    def extend(self, nearest_x, nearest_y, sample_x, sample_y):
-        """
-        Extend given distance towards the sample point
-        """
-        angle = math.atan2(sample_y - nearest_y, sample_x - nearest_x)
-        new_x = nearest_x + math.cos(angle) * self.step_size
-        new_y = nearest_y + math.sin(angle) * self.step_size
-
-        if not self.check_obs(nearest_x, nearest_y, new_x, new_y):
-            return new_x, new_y
-
-        return None, None
-
-    def check_obs(self, start_x, start_y, goal_x, goal_y):
-        """
-        Check collision
-        :param ix, iy, nx, ny: start point and end point
-        :return: (bool)
-        """
-        dx = goal_x - start_x
-        dy = goal_y - start_y
-        angle = np.arctan2(dy, dx)
-        dist = np.sqrt(np.square(dx) + np.square(dy))
-
-        step_size = self.avoid_dist
-        steps = np.round(dist / step_size) - 1
-
-        # print("dist: ", dist, "step: ", step_size)
-        start_x += step_size * np.cos(angle)
-        start_y += step_size * np.sin(angle)
-        goal_x -= step_size * np.cos(angle)
-        goal_y -= step_size * np.sin(angle)
-
-        for i in range(int(steps)):
-            distance, index = self.obs_tree.query(np.array([start_x, start_y]))
-            if distance <= self.avoid_dist + self.robot_radius:
-                # print("dist_obs: ", distance)
-                return True
-            start_x += step_size * np.cos(angle)
-            start_y += step_size * np.sin(angle)
-
-        # check for goal point
-        distance, index = self.obs_tree.query(np.array([goal_x, goal_y]))
-        if distance <= self.avoid_dist:
+        distance, index = rtree.query(np.array([plan_gx, plan_gy]))
+        # 判断与终点距离是否小于一定阈值
+        if distance >= self.achieve_dis:
             return True
 
         return False
 
-    def cal_euler_dst(self, x1, y1, x2, y2):
+    # 检测两点之间连线是否与障碍物发生碰撞，若有碰撞则返回True，否则返回False
+    def check_obs(self, ix, iy, nx, ny, obstree, start_x, start_y):
         """
-        Calculate the Euler distance between two points
-        :return: (float)
-        """
-        return np.sqrt(np.square(x1 - x2) + np.square(y1 - y2))
 
-    def cal_cost(self, start, end, road_map, rrt_x, rrt_y):
+        :param ix: 连线起点横坐标
+        :param iy: 连线起点纵坐标
+        :param nx: 连线终点横坐标
+        :param ny: 连线终点纵坐标
+        :param obstree: 障碍物的KDtree
+        :return: True or False
         """
-        Calculate the Euler distance from start to end
-        :param start: index of start node
-        :param end: index of end node
-        :param road_map: index of father node
+        x = ix
+        y = iy
+        dx = nx - ix
+        dy = ny - iy
+        angle = math.atan2(dy, dx)
+        dis = math.hypot(dx, dy)
+        # step_size = self.robot_size + self.avoid_dist
+        step_size = 0.2
+        steps = round(dis/step_size)
+        # 两点间逐步检测
+        for i in range(steps):
+            distance, index = obstree.query(np.array([x, y]))
+            if distance <= self.robot_size + self.avoid_dist and (x, y) != (start_x, start_y):
+                return True
+            x += step_size * math.cos(angle)
+            y += step_size * math.sin(angle)
+        # 检测终点
+        distance, index = obstree.query(np.array([nx, ny]))
+        if distance <= self.robot_size + self.avoid_dist:
+            return True
+
+        return False
+
+    # 判断新生节点是否与rrt树上已有节点重复（距离小于一定阈值），如果重复则返回True，否则返回False
+    def check_rpt(self, nx, ny, rtree):
         """
-        father_index, current_index = road_map[end], end
-        current_dst = 0
-        # print("father index: ", father_index)
-        # print("current index: ", current_index)
-        # print("road_map: ", road_map)
-        while father_index != road_map[start]:
-            current_dst += self.cal_euler_dst(rrt_x[father_index], rrt_y[father_index],
-                                              rrt_x[current_index], rrt_y[current_index])
-            current_index = father_index
-            father_index = road_map[father_index]
-        return current_dst
 
-    def final_path(self, rrt_x, rrt_y, road_map, final_points):
-        path = []
-        final_point = 0
-        min_dst = 999999
-        for i in final_points:
-            current_dst = self.cal_cost(0, i, road_map, rrt_x, rrt_y)
-            if current_dst < min_dst:
-                min_dst = current_dst
-                final_point = i
-        path.append(final_point)
-        father_index = road_map[final_point]
-        while father_index != -1:
-            path.append(father_index)
-            father_index = road_map[father_index]
-        path.reverse()
-        return path
+        :param nx: 节点横坐标
+        :param ny: 节点纵坐标
+        :param rtree: rrt的KDtree
+        :return: True or False
+        """
+        distance, index = rtree.query(np.array([nx, ny]))
+        if distance <= self.rpt_dis:
+            return True
 
-    def make_straight(self, path_x, path_y):
-        newpath_x, newpath_y = [path_x[0]], [path_y[0]]
+        return False
+
+    # 检查rrt树节点数是否超范围，如果超过预设上限则返回False，否则返回Ture
+    def check_len(self, rt_x):
+        """
+
+        :param rt_x: rrt树节点的横坐标数组
+        :return: True or False
+        """
+        if len(rt_x) >= self.N_SAMPLE:
+            return False
+        return True
+
+    # 路径优化函数，避免不必要的小转弯减少折线数，输入待优化路径的节点xy坐标及障碍物KDtree，返回优化后路径的节点xy坐标
+    def optimize(self, path_x, path_y, obstree):
+        """
+
+        :param path_x: 规划路径上节点的横坐标序列
+        :param path_y: 规划路径上节点的纵坐标序列
+        :param obstree: 障碍物的KDtree
+        :return: 优化后路径上节点的横纵坐标序列
+        """
+        # 如果路径过短，无法优化
+        if len(path_x) <= 3:
+            return path_x, path_y
+
         i = 0
+        flag = 0
         while True:
-            j = 0
-            for j in np.arange(len(path_x) - 1, i, -1):
-                if not self.check_obs(path_x[i], path_y[i], path_x[j], path_y[j]):
-                    newpath_x.append(path_x[j])
-                    newpath_y.append(path_y[j])
-                    i = j
+            # 寻找距离此次优化起点最远的且连线不与障碍物发生碰撞的节点
+            for j in range(i+2, len(path_x)):
+                if self.check_obs(path_x[i], path_y[i], path_x[j], path_y[j], obstree, path_x[0], path_y[0]):
+                    flag = 1
                     break
-            if j == len(path_x) - 1 and i == j - 1:
+            # 记录本次优化的起点索引
+            sindex = i
+            # 如果遍历整条路径上的点均无碰撞，则本次优化的终点即为原路径终点，否则本次优化终点索引为找到的第一个发生碰撞的节点的上一个节点的索引
+            if j == len(path_x) - 1 and not flag:
+                gindex = j
+            else:
+                gindex = j-1
+            nsx = path_x[gindex]
+            # 更新路径，抛弃本次优化起点终点之间的所有节点，直接将二者相连
+            opath_x, opath_y = [], []
+            opath_x.extend(path_x[:sindex])
+            opath_y.extend(path_y[:sindex])
+            opath_x.append(path_x[sindex])
+            opath_y.append(path_y[sindex])
+            opath_x.extend(path_x[gindex:])
+            opath_y.extend(path_y[gindex:])
+            path_x = opath_x
+            path_y = opath_y
+
+            i = path_x.index(nsx)
+            flag = 0
+            # 优化结束则跳出循环
+            if i >= len(path_x)-2:
                 break
-            elif i == len(path_x) - 1:
-                break
 
-        return newpath_x, newpath_y
+        return path_x, path_y
+
+    # 路径插值函数，对路径相邻两点之间进行逐步打点，输入待插值路径节点xy坐标，返回插值后路径节点xy坐标
+    def inter(self, path_x, path_y):
+        """
+
+        :param path_x: 待插值的路径上节点的横坐标序列
+        :param path_y: 待插值的路径上节点的纵坐标序列
+        :return: 插值后的路径上节点的横纵坐标序列
+        """
+        # 初始化插值步长，新路径节点坐标序列
+        lstep = 0.5
+        npath_x, npath_y = [], []
+        npath_x.append(path_x[0])
+        npath_y.append(path_y[0])
+        length = len(path_x)
+        # 每相邻两点进行插值
+        for i in range(length-1):
+            sx = path_x[i]
+            sy = path_y[i]
+            gx = path_x[i+1]
+            gy = path_y[i+1]
+            dx = gx - sx
+            dy = gy - sy
+            dis = math.hypot(dx, dy)
+            counts = math.floor(dis / lstep)
+
+            # 逐步插值
+            for j in range(1, counts):
+                sx += lstep * dx / dis
+                sy += lstep * dy / dis
+                npath_x.append(sx)
+                npath_y.append(sy)
+
+            # 将插值点加入新路径序列
+            npath_x.append(gx)
+            npath_y.append(gy)
+
+        return npath_x, npath_y
 
 
-if __name__ == "__main__":
-    ox = [1, 2, 3, 4, 5]
-    oy = [1, 2, 3, 4, 5]
 
-    planner = RRT(ox, oy, grid_size=0.3, robot_radius=0.8, max_point_num=100, max_sample_times=500, prob_goal=0.5)
-
-    # 1. path planning
-    start_x, start_y = 0, 0
-    goal_x, goal_y = 8, 8
-    # path_x[0], path_y[0] is the first target position
-    path_x, path_y = planner.plan(start_x, start_y, goal_x, goal_y)
-    print(path_x, path_y)

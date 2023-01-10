@@ -1,3 +1,11 @@
+from a_star import Astar as Planner
+# from rrt import RRT as Planner
+# from rrt_star import RRTSTAR as Planner
+# from rrt_connect import RRTCONNECT as Planner
+# from rrt_star_connect import RRTSTANECT as Planner
+
+import dwa
+
 import time
 import argparse
 import subprocess
@@ -10,16 +18,8 @@ import math
 import rospy
 import rospkg
 
-from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import Twist
-
 from gazebo_simulation import GazeboSimulation
-from global_planner import GlobalPlanner
-
-# from rrt2 import RRT as Planner
-from rrt_connect import RRTCONNECT as Planner
-# from a_star import Astar as Planner
-import dwa2
+from map import Map
 
 INIT_POSITION = [-2, 3, 1.57]  # in world frame
 GOAL_POSITION = [0, 10]  # relative to the initial position
@@ -117,20 +117,23 @@ if __name__ == "__main__":
     #     'roslaunch',
     #     launch_file,
     # ])
-    launch_file = join(base_path, '..', 'jackal_helper/launch/map.launch')
+    map_name = f"BARN/map_files/yaml_{args.world_idx}.yaml"
+    map_name = join(base_path, "worlds", map_name)
+    launch_file = join(base_path, 'launch/map.launch')
+    print(map_name)
     map_process = subprocess.Popen([
         'roslaunch',
-        launch_file
+        launch_file,
+        'map_name:=' + map_name,
     ])
 
-    global_planner = GlobalPlanner()
-    # map_sub = rospy.Subscriber("/map", OccupancyGrid, mapCallback)
+    map = Map()
     rospy.sleep(2)
 
-    path_planner = Planner(global_planner.obstacle_x, global_planner.obstacle_y, 1, 0.3)
+    path_planner = Planner(map.obstacle_x, map.obstacle_y, 1, 0.35)
     path_x, path_y, turning = path_planner.plan(INIT_POSITION[0], INIT_POSITION[1], GOAL_POSITION[0], GOAL_POSITION[1])
     plt.figure()
-    plt.scatter(global_planner.obstacle_x, global_planner.obstacle_y, c="k")
+    plt.scatter(map.obstacle_x, map.obstacle_y, c="k")
     plt.scatter(path_x, path_y, c="r")
     plt.show()
 
@@ -166,21 +169,15 @@ if __name__ == "__main__":
     #     pos = gazebo_sim.get_model_state().pose.position
     #     curr_coor = (pos.x, pos.y)
     #     time.sleep(0.01)
-    #     print("xxx")
 
     # start navigation, check position, time and collision
     start_time = curr_time
     start_time_cpu = time.time()
     collided = False
 
-    v = 0
-    w = 0
+    v, w = 0, 0
+    vwplanner = dwa.DWA()
 
-    get = 0
-    config = dwa2.Config()
-    vwplanner = dwa2.DWA(config)
-
-    # my dwa!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # while compute_distance(goal_coor, curr_coor) > 1 and not collided and curr_time - start_time < 100:
     #     curr_time = rospy.get_time()
     #     pos = gazebo_sim.get_model_state().pose.position
@@ -204,18 +201,18 @@ if __name__ == "__main__":
             # start_time = time.time()
             plan_state = [start_x, start_y, start_yaw, v, w]
             plan_goal = [goal_x, goal_y, goal_turn]
-            plan_obs = [global_planner.obstacle_x, global_planner.obstacle_y]
+            plan_obs = [map.obstacle_x, map.obstacle_y]
             v, w, pre_x, pre_y, pre_yaw = vwplanner.plan(plan_state, plan_goal, plan_obs)
             gazebo_sim.pub_cmd_vel([v, w])
             # end_time = time.time()
             # print('time:', end_time-start_time)
-            print("Move!\n")
-            print("My position:", plan_state)
-            print("My Goal", plan_goal)
+            # print("Move!\n")
+            # print("My position:", plan_state)
+            # print("My Goal", plan_goal)
 
             # 判断是否到达阶段目标点
             if math.sqrt((pos.x - goal_x) ** 2 + (pos.y - goal_y) ** 2) < 0.5:
-                print("get to this goal")
+                # print("get to this goal")
                 break
 
 
