@@ -1,11 +1,3 @@
-from a_star import Astar as Planner
-# from rrt import RRT as Planner
-# from rrt_star import RRTSTAR as Planner
-# from rrt_connect import RRTCONNECT as Planner
-# from rrt_star_connect import RRTSTANECT as Planner
-
-import dwa
-
 import time
 import argparse
 import subprocess
@@ -20,6 +12,13 @@ import rospkg
 
 from gazebo_simulation import GazeboSimulation
 from map import Map
+
+from a_star import Astar as Planner
+import dwa
+# from rrt import RRT as Planner
+# from rrt_star import RRTSTAR as Planner
+# from rrt_connect import RRTCONNECT as Planner
+# from rrt_starnect import RRTSTANECT as Planner
 
 INIT_POSITION = [-2, 3, 1.57]  # in world frame
 GOAL_POSITION = [0, 10]  # relative to the initial position

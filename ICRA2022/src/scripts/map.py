@@ -11,7 +11,6 @@ class Map(object):
         self.map_sub = rospy.Subscriber("/map", OccupancyGrid, self.mapCallback)
 
     def mapCallback(self, msg):
-        """ 获取地图中的障碍物信息 """
         map_data = np.array(msg.data).reshape((msg.info.height, -1)).transpose()
         ox, oy = np.nonzero(map_data > 50)
         self.obstacle_x = (ox * msg.info.resolution + msg.info.origin.position.x).tolist()

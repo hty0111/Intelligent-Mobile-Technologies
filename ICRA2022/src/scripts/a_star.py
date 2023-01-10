@@ -128,21 +128,18 @@ class Astar(object):
         return path_x, path_y, defult_turning
 
     def is_openset(self, node):
-        """ 判断是否在 open list 中 """
         for opennode in self.open_set:
             if opennode.x == node.x and opennode.y == node.y:
                 return opennode
         return False
 
     def is_closeset(self, node):
-        """ 判断是否在 close list 中 """
         for closenode in self.close_set:
             if closenode.x == node.x and closenode.y == node.y:
                 return True
         return False
 
     def make_straight(self, path_x, path_y):
-        """ 把路径取直 """
         # print(f"len:{len(path_x)}")
         newpath_x, newpath_y = [path_x[0]], [path_y[0]]
         i = 0
